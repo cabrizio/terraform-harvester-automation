@@ -1,0 +1,107 @@
+# roles/lvm_manager/tasks/data_disk.yml
+# Data disk LVM setup tasks
+
+- name: Data Disk Setup Block
+  block:
+    - name: Check if data disk exists
+      stat:
+        path: "{{ lvm_data_disk }}"
+      register: lvm_data_disk_stat
+
+    - name: Fail if data disk not found
+      fail:
+        msg: "Data disk {{ lvm_data_disk }} not found!"
+      when:
+        - not lvm_data_disk_stat.stat.exists
+        - lvm_setup_data_disk | bool
+
+    - name: Create partition on data disk
+      community.general.parted:
+        device: "{{ lvm_data_disk }}"
+        number: 1
+        flags: [ lvm ]
+        state: present
+        label: "{{ lvm_data_partition_label }}"
+        part_start: 0%
+        part_end: 100%
+        resize: true
+      when: lvm_data_disk_stat.stat.exists
+
+    - name: Wait for data disk partition
+      wait_for:
+        path: "{{ lvm_data_disk }}1"
+        timeout: 30
+      when: lvm_data_disk_stat.stat.exists
+
+    - name: Create data volume group
+      lvg:
+        vg: "{{ lvm_data_vg }}"
+        pvs: "{{ lvm_data_disk }}1"
+        pesize: "{{ lvm_vg_pesize }}"
+        state: present
+        pvresize: true
+      when: lvm_data_disk_stat.stat.exists
+      register: lvm_data_vg_result
+
+    - name: Create data logical volumes
+      lvol:
+        vg: "{{ lvm_data_vg }}"
+        lv: "{{ item.name }}"
+        size: "{{ item.size }}"
+        state: present
+        resizefs: false
+      loop: "{{ lvm_data_volumes }}"
+      when:
+        - lvm_data_disk_stat.stat.exists
+        - lvm_extend_existing | default(true)
+      register: lvm_data_lv_result
+
+    - name: Create filesystems on data volumes
+      filesystem:
+        fstype: "{{ item.fs_type }}"
+        dev: "/dev/{{ lvm_data_vg }}/{{ item.name }}"
+        opts: "{{ item.fs_opts | default(omit) }}"
+      loop: "{{ lvm_data_volumes }}"
+      when:
+        - lvm_data_disk_stat.stat.exists
+        - lvm_data_lv_result.changed or lvm_force_operations
+      register: lvm_data_fs_result
+
+    - name: Create mount points for data volumes
+      file:
+        path: "{{ item.mount_point }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ item.owner | default('root') }}"
+        group: "{{ item.group | default('root') }}"
+      loop: "{{ lvm_data_volumes }}"
+      when: lvm_data_disk_stat.stat.exists
+
+    - name: Mount data volumes
+      mount:
+        path: "{{ item.mount_point }}"
+        src: "/dev/{{ lvm_data_vg }}/{{ item.name }}"
+        fstype: "{{ item.fs_type }}"
+        opts: "{{ item.mount_options | default(lvm_default_mount_options[item.fs_type]) }}"
+        state: mounted
+        backup: "{{ lvm_backup_before_resize }}"
+      loop: "{{ lvm_data_volumes }}"
+      when: lvm_data_disk_stat.stat.exists
+      notify: reload systemd
+
+    - name: Data disk setup complete
+      debug:
+        msg: "Data disk {{ lvm_data_disk }} configured with {{ lvm_data_volumes | length }} volumes"
+      when: lvm_data_disk_stat.stat.exists
+
+  rescue:
+    - name: Data disk setup failed
+      debug:
+        msg: "Data disk setup failed. Check disk availability and permissions."
+
+    - name: Log data disk error
+      debug:
+        var: ansible_failed_result
+      when: lvm_debug | bool
+
+  when: lvm_setup_data_disk | bool

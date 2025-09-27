@@ -1,0 +1,23 @@
+# roles/lvm_manager/tasks/install.yml
+# Install LVM packages
+
+- name: Update package cache (Debian/Ubuntu)
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: Install LVM packages
+  package:
+    name: "{{ lvm_packages[ansible_os_family] }}"
+    state: "{{ lvm_package_state }}"
+
+- name: Ensure LVM services are started
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - lvm2-lvmpolld
+    - lvm2-monitor
+  failed_when: false

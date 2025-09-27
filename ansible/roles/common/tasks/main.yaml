@@ -1,0 +1,43 @@
+---
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Upgrade all packages
+  apt:
+    upgrade: dist
+    autoremove: yes
+    autoclean: yes
+
+- name: Install essential packages
+  apt:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: Install development packages
+  apt:
+    name: "{{ dev_packages }}"
+    state: present
+  when: install_dev_tools | default(true)
+
+- name: Set timezone
+  timezone:
+    name: "{{ system_timezone | default('UTC') }}"
+
+- name: Create useful bash aliases
+  copy:
+    content: "{{ bash_aliases }}"
+    dest: /etc/profile.d/custom-aliases.sh
+    mode: '0644'
+
+- name: Configure automatic updates
+  copy:
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+      APT::Periodic::Unattended-Upgrade "1";
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: '0644'
+  when: enable_auto_updates | default(true)

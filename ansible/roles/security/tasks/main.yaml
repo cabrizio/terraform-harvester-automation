@@ -1,0 +1,74 @@
+---
+- name: Install security packages
+  apt:
+    name: "{{ security_packages }}"
+    state: present
+
+- name: Configure SSH security settings
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?{{ item.key }}"
+    line: "{{ item.key }} {{ item.value }}"
+    backup: yes
+  loop: "{{ ssh_security_config }}"
+  notify: restart ssh
+
+- name: Configure UFW defaults
+  ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: 'incoming', policy: 'deny' }
+    - { direction: 'outgoing', policy: 'allow' }
+
+- name: Allow SSH access
+  ufw:
+    rule: allow
+    port: "{{ ssh_port }}"
+    proto: tcp
+    comment: 'SSH access'
+
+- name: Allow additional ports
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ firewall_allowed_ports }}"
+  when: firewall_allowed_ports is defined
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+    logging: 'on'
+
+- name: Configure Fail2Ban for SSH
+  copy:
+    content: |
+      [sshd]
+      enabled = true
+      port = {{ ssh_port }}
+      filter = sshd
+      logpath = /var/log/auth.log
+      maxretry = {{ fail2ban_maxretry }}
+      bantime = {{ fail2ban_bantime }}
+      findtime = {{ fail2ban_findtime }}
+    dest: /etc/fail2ban/jail.d/sshd.local
+    mode: '0644'
+  when: fail2ban_enabled
+  notify: restart fail2ban
+
+- name: Start and enable Fail2Ban
+  systemd:
+    name: fail2ban
+    state: started
+    enabled: yes
+  when: fail2ban_enabled
+
+- name: Apply kernel security parameters
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: yes
+    state: present
+    reload: yes
+  loop: "{{ kernel_security_params }}"

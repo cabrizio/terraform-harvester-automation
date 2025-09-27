@@ -1,0 +1,37 @@
+# roles/lvm_manager/tasks/main.yml
+# Main LVM management tasks
+
+- name: Include OS-specific variables
+  include_vars: "{{ ansible_os_family }}.yml"
+  failed_when: false
+
+- name: Debug LVM configuration
+  debug:
+    msg:
+      - "Data disk setup: {{ lvm_setup_data_disk }}"
+      - "Root disk: {{ lvm_root_disk }}"
+      - "Data disk: {{ lvm_data_disk }}"
+  when: lvm_debug | bool
+
+- name: Install LVM packages
+  include_tasks: install.yml
+
+- name: Display current disk layout
+  command: lsblk
+  register: lvm_initial_layout
+  changed_when: false
+
+- name: Show initial disk layout
+  debug:
+    var: lvm_initial_layout.stdout_lines
+  when: lvm_debug | bool
+
+- name: Setup data disk
+  include_tasks: data_disk.yml
+  when: lvm_setup_data_disk | bool
+
+- name: Verify LVM configuration
+  include_tasks: verify.yml
+
+- name: Notify handlers
+  meta: flush_handlers

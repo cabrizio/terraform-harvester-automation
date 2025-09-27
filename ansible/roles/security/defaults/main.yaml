@@ -1,0 +1,42 @@
+---
+# Security packages
+security_packages:
+  - ufw
+  - fail2ban
+  - unattended-upgrades
+
+# SSH configuration
+ssh_port: 22
+ssh_security_config:
+  - { key: 'PermitRootLogin', value: 'no' }
+  - { key: 'PasswordAuthentication', value: 'yes' }  # Change to 'no' when SSH keys work
+  - { key: 'PubkeyAuthentication', value: 'yes' }
+  - { key: 'PermitEmptyPasswords', value: 'no' }
+  - { key: 'X11Forwarding', value: 'no' }
+  - { key: 'MaxAuthTries', value: '3' }
+  - { key: 'ClientAliveInterval', value: '300' }
+  - { key: 'ClientAliveCountMax', value: '2' }
+
+# Firewall settings
+# Note: SSH port is handled separately to ensure it's always allowed
+firewall_allowed_ports:
+  - '80'   # HTTP
+  - '443'  # HTTPS
+
+# Fail2Ban settings
+fail2ban_enabled: true
+fail2ban_maxretry: 3
+fail2ban_bantime: 3600
+fail2ban_findtime: 600
+
+# Kernel security parameters
+kernel_security_params:
+  - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+  - { name: 'net.ipv4.conf.default.send_redirects', value: '0' }
+  - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+  - { name: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+  - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+  - { name: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+  - { name: 'net.ipv4.conf.all.log_martians', value: '1' }
+  - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+  - { name: 'net.ipv4.tcp_syncookies', value: '1' }

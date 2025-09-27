@@ -1,0 +1,33 @@
+---
+- name: Add Docker GPG key (Debian/Ubuntu)
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Add Docker repository (Debian/Ubuntu)
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Install Docker (Debian/Ubuntu)
+  apt:
+    name: "{{ docker_packages_debian }}"
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+  notify: restart docker
+
+- name: Start and enable Docker service
+  systemd:
+    name: docker
+    state: "{{ 'started' if start_services else 'stopped' }}"
+    enabled: "{{ enable_services }}"
+
+- name: Add user to docker group
+  user:
+    name: "{{ docker_user }}"
+    groups: docker
+    append: yes
+  when: docker_user is defined and docker_user != ""

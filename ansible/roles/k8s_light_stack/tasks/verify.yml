@@ -1,0 +1,32 @@
+---
+- name: Verify Docker installation
+  command: docker --version
+  register: docker_version_output
+  changed_when: false
+  when: install_docker | bool
+
+- name: Verify kubectl installation
+  command: kubectl version --client
+  register: kubectl_version_output
+  changed_when: false
+  when: install_kubectl | bool
+
+- name: Verify k3d installation
+  command: k3d version
+  register: k3d_version_output
+  changed_when: false
+  when: install_k3d | bool
+
+- name: Verify k3s installation
+  command: k3s --version
+  register: k3s_version_output
+  changed_when: false
+  when: install_k3s | bool
+
+- name: Display installation results
+  debug:
+    msg:
+      - "{{ 'Docker: ' + docker_version_output.stdout if install_docker else 'Docker: Skipped' }}"
+      - "{{ 'kubectl: ' + kubectl_version_output.stdout if install_kubectl else 'kubectl: Skipped' }}"
+      - "{{ 'k3d: ' + k3d_version_output.stdout if install_k3d else 'k3d: Skipped' }}"
+      - "{{ 'k3s: ' + k3s_version_output.stdout if install_k3s else 'k3s: Skipped' }}"

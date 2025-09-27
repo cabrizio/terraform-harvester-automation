@@ -1,0 +1,87 @@
+---
+- name: Get latest k3s version
+  uri:
+    url: https://api.github.com/repos/k3s-io/k3s/releases/latest
+    return_content: yes
+  register: k3s_latest_release
+  when: k3s_version == "latest"
+
+- name: Set k3s version variable
+  set_fact:
+    k3s_install_version: "{{ k3s_latest_release.json.tag_name if k3s_version == 'latest' else k3s_version }}"
+
+- name: Download k3s installation script
+  get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: '0755'
+
+- name: Install k3s server (first node)
+  shell: |
+    INSTALL_K3S_VERSION="{{ k3s_install_version }}" /tmp/k3s-install.sh
+  environment:
+    INSTALL_K3S_EXEC: "{{ k3s_extra_server_args }}"
+  when: k3s_server_init | bool
+  register: k3s_server_install
+
+- name: Install k3s server (additional nodes)
+  shell: |
+    INSTALL_K3S_VERSION="{{ k3s_install_version }}" /tmp/k3s-install.sh server
+  environment:
+    K3S_URL: "{{ k3s_server_url }}"
+    K3S_TOKEN: "{{ k3s_token }}"
+    INSTALL_K3S_EXEC: "{{ k3s_extra_server_args }}"
+  when: not k3s_server_init | bool and not k3s_agent_join | bool and k3s_server_url != ""
+
+- name: Install k3s agent
+  shell: |
+    INSTALL_K3S_VERSION="{{ k3s_install_version }}" /tmp/k3s-install.sh agent
+  environment:
+    K3S_URL: "{{ k3s_server_url }}"
+    K3S_TOKEN: "{{ k3s_token }}"
+    INSTALL_K3S_EXEC: "{{ k3s_extra_agent_args }}"
+  when: k3s_agent_join | bool
+
+- name: Start and enable k3s service
+  systemd:
+    name: k3s
+    state: "{{ 'started' if start_services else 'stopped' }}"
+    enabled: "{{ enable_services }}"
+  when: k3s_server_init | bool or (not k3s_agent_join | bool and k3s_server_url != "")
+
+- name: Start and enable k3s-agent service
+  systemd:
+    name: k3s-agent
+    state: "{{ 'started' if start_services else 'stopped' }}"
+    enabled: "{{ enable_services }}"
+  when: k3s_agent_join | bool
+
+- name: Get k3s node token
+  slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_node_token
+  when: k3s_server_init | bool
+
+- name: Display k3s node token
+  debug:
+    msg: "k3s node token: {{ k3s_node_token.content | b64decode | trim }}"
+  when: k3s_server_init | bool
+
+- name: Create .kube directory for user
+  file:
+    path: "/home/{{ docker_user }}/.kube"
+    state: directory
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0755'
+  when: docker_user != "root" and (k3s_server_init | bool or (not k3s_agent_join | bool and k3s_server_url != ""))
+
+- name: Copy kubeconfig for user
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "/home/{{ docker_user }}/.kube/config"
+    remote_src: yes
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: '0600'
+  when: docker_user != "root" and (k3s_server_init | bool or (not k3s_agent_join | bool and k3s_server_url != ""))

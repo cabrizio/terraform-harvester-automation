@@ -1,0 +1,3 @@
+# roles/lvm_manager/templates/fstab_entry.j2
+# LVM mount entry for {{ item.mount_point }}
+/dev/{{ lvm_data_vg }}/{{ item.name }} {{ item.mount_point }} {{ item.fs_type }} {{ item.mount_options | default(lvm_default_mount_options[item.fs_type]) }} 0 2

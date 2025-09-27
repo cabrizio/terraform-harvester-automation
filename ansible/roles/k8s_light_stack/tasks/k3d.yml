@@ -1,0 +1,24 @@
+---
+- name: Get latest k3d version
+  uri:
+    url: https://api.github.com/repos/k3d-io/k3d/releases/latest
+    return_content: yes
+  register: k3d_latest_release
+  when: k3d_version == "latest"
+
+- name: Set k3d version variable
+  set_fact:
+    k3d_install_version: "{{ k3d_latest_release.json.tag_name if k3d_version == 'latest' else k3d_version }}"
+
+- name: Download k3d binary
+  get_url:
+    url: "https://github.com/k3d-io/k3d/releases/download/{{ k3d_install_version }}/k3d-linux-amd64"
+    dest: /tmp/k3d
+    mode: '0755'
+
+- name: Install k3d
+  copy:
+    src: /tmp/k3d
+    dest: /usr/local/bin/k3d
+    mode: '0755'
+    remote_src: yes

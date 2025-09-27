@@ -1,0 +1,26 @@
+---
+- name: Install prerequisites
+  include_tasks: "{{ ansible_os_family | lower }}_prerequisites.yml"
+
+- name: Install Docker
+  include_tasks: docker.yml
+  when: install_docker | bool
+
+- name: Install kubectl
+  include_tasks: kubectl.yml
+  when: install_kubectl | bool
+
+- name: Install k3d
+  include_tasks: k3d.yml
+  when: install_k3d | bool
+
+- name: Install k3s
+  include_tasks: k3s.yml
+  when: install_k3s | bool
+
+- name: Verify installations
+  include_tasks: verify.yml
+
+- name: Cleanup temporary files
+  include_tasks: cleanup.yml
+  when: cleanup_temp_files | bool

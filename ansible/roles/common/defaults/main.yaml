@@ -1,0 +1,39 @@
+---
+# Essential packages for server management
+common_packages:
+  - curl
+  - wget
+  - vim
+  - htop
+  - tree
+  - unzip
+  - git
+  - net-tools
+  - jq
+  - python3-pip
+  - software-properties-common
+
+# Development tools
+dev_packages:
+  - build-essential
+  - make
+  - gcc
+  - nodejs
+  - npm
+
+# System settings
+system_timezone: UTC
+enable_auto_updates: true
+install_dev_tools: true
+
+# Bash aliases content
+bash_aliases: |
+  alias ll='ls -alF'
+  alias la='ls -A'
+  alias ..='cd ..'
+  alias grep='grep --color=auto'
+  alias df='df -h'
+  alias free='free -h'
+  alias ports='netstat -tulanp'
+  alias update='sudo apt update && sudo apt upgrade'
+  alias logs='sudo journalctl -f'

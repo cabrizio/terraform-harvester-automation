@@ -1,0 +1,68 @@
+# roles/lvm_manager/tasks/verify.yml
+# LVM verification tasks
+
+- name: Display final disk layout
+  command: lsblk
+  register: lvm_final_layout
+  changed_when: false
+
+- name: Show final disk layout
+  debug:
+    var: lvm_final_layout.stdout_lines
+
+- name: Display filesystem usage
+  command: df -h
+  register: lvm_fs_usage
+  changed_when: false
+
+- name: Show filesystem usage
+  debug:
+    var: lvm_fs_usage.stdout_lines
+
+- name: Get LVM information
+  command: "{{ item }}"
+  register: lvm_info_commands
+  changed_when: false
+  failed_when: false
+  loop:
+    - "pvdisplay --short"
+    - "vgdisplay --short"
+    - "lvdisplay --short"
+
+- name: Display LVM information
+  debug:
+    msg: "{{ item.stdout_lines }}"
+  loop: "{{ lvm_info_commands.results }}"
+  when: item.rc == 0
+
+- name: Verify mount points
+  command: findmnt {{ item.mount_point }}
+  register: lvm_mount_verify
+  changed_when: false
+  failed_when: false
+  loop: "{{ lvm_data_volumes }}"
+  when: lvm_setup_data_disk | bool
+
+- name: Display mount verification
+  debug:
+    msg: "Mount point {{ item.item.mount_point }}: {{ 'OK' if item.rc == 0 else 'NOT MOUNTED' }}"
+  loop: "{{ lvm_mount_verify.results }}"
+  when:
+    - lvm_setup_data_disk | bool
+    - lvm_mount_verify is defined
+
+- name: Copy LVM check script
+  copy:
+    src: lvm_check.sh
+    dest: /usr/local/bin/lvm_check.sh
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: LVM configuration summary
+  debug:
+    msg:
+      - "=== LVM Configuration Complete ==="
+      - "Data disk setup: {{ 'Completed' if lvm_setup_data_disk else 'Skipped' }}"
+      - "Data volumes created: {{ lvm_data_volumes | length if lvm_setup_data_disk else 0 }}"
+      - "Run '/usr/local/bin/lvm_check.sh' for detailed status"

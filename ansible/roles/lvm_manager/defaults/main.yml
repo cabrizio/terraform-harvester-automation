@@ -1,0 +1,33 @@
+# roles/lvm_manager/defaults/main.yml
+# LVM Role Default Variables
+
+# General LVM settings
+lvm_package_state: present
+lvm_debug: false
+
+# Data disk settings
+lvm_setup_data_disk: false
+lvm_data_disk: /dev/vdb
+lvm_data_vg: vg_data
+lvm_data_partition_label: gpt
+
+# Data volumes configuration
+lvm_data_volumes:
+  - name: data
+    size: 100%VG
+    mount_point: /data
+    fs_type: ext4
+    mount_options: defaults,noatime
+
+# Volume group settings
+lvm_vg_pesize: 4  # PE size in MB
+
+# Filesystem settings
+lvm_default_mount_options:
+  ext4: defaults,relatime
+  xfs: defaults,noatime
+  btrfs: defaults,noatime,compress=zstd
+
+# Safety settings
+lvm_force_operations: false
+lvm_backup_before_resize: true

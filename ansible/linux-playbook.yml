@@ -1,0 +1,69 @@
+---
+- name: Setup and Secure Ubuntu Server
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    enable_container: false  # Set to true to enable containerization tools
+
+  pre_tasks:
+    - name: Wait for system to become reachable
+      wait_for_connection:
+        timeout: 300
+
+    - name: Display server information
+      debug:
+        msg: |
+          Configuring server: {{ inventory_hostname }}
+          IP Address: {{ ansible_default_ipv4.address | default('N/A') }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+
+  roles:
+    - role: common
+    - role: security
+    - role: lvm_manager
+      vars:
+        lvm_expand_root: true
+        lvm_root_disk: /dev/vda
+        lvm_root_partition: 3
+        lvm_setup_data_disk: true
+        lvm_data_disk: /dev/vdb
+        lvm_data_volumes:
+          - name: data
+            size: "50%VG"
+            mount_point: /data
+            fs_type: ext4
+          - name: logs
+            size: "10%VG"
+            mount_point: /var/log/app
+            fs_type: xfs
+    - role: k8s_light_stack
+      vars:
+        k3s_server_init: true
+        docker_user: "{{ ansible_user }}"
+        install_docker: true
+        install_kubectl: true
+        install_k3d: true
+        install_k3s: true
+      when: enable_container | bool
+
+  post_tasks:
+    - name: Verify SSH service is running
+      service_facts:
+
+    - name: Check SSH service status
+      assert:
+        that:
+          - ansible_facts.services['ssh.service'].state == 'running'
+        fail_msg: "SSH service is not running!"
+        success_msg: "SSH service is running correctly"
+
+    - name: Display setup completion
+      debug:
+        msg: |
+          Server setup completed successfully!
+          - Common packages installed
+          - System secured with UFW firewall
+          - SSH hardened
+          - Fail2Ban configured
+          - Automatic updates enabled

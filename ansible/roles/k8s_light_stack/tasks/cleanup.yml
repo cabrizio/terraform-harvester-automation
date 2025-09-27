@@ -1,0 +1,9 @@
+---
+- name: Clean up temporary files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/kubectl
+    - /tmp/k3d
+    - /tmp/k3s-install.sh

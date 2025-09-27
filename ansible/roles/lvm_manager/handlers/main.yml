@@ -1,0 +1,18 @@
+# roles/lvm_manager/handlers/main.yml
+# LVM role handlers
+
+- name: update partition table
+  command: partprobe
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart lvm services
+  systemd:
+    name: "{{ item }}"
+    state: restarted
+  loop:
+    - lvm2-lvmpolld
+    - lvm2-monitor
+  failed_when: false

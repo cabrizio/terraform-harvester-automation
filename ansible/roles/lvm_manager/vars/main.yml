@@ -1,0 +1,21 @@
+# roles/lvm_manager/vars/main.yml
+# LVM Role Variables (higher precedence than defaults)
+
+# Required packages per OS family
+lvm_packages:
+  Debian:
+    - lvm2
+    - parted
+    - xfsprogs
+    - e2fsprogs
+  RedHat:
+    - lvm2
+    - parted
+    - xfsprogs
+    - e2fsprogs
+
+# Filesystem tools
+lvm_fs_tools:
+  ext4: e2fsprogs
+  xfs: xfsprogs
+  btrfs: btrfs-progs

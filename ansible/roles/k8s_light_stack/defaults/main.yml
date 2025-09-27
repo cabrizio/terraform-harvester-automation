@@ -1,0 +1,30 @@
+---
+# Version configuration
+docker_version: "latest"
+k3s_version: "v1.28.3+k3s1"  # Set to 'latest' for latest version
+k3d_version: "v5.6.0"        # Set to 'latest' for latest version
+kubectl_version: "v1.28.0"   # Set to 'latest' for latest version
+
+# User configuration
+docker_user: "{{ ansible_user }}"
+
+# k3s cluster configuration
+k3s_server_init: false        # Set to true for the first server node
+k3s_agent_join: false         # Set to true for agent nodes
+k3s_server_url: ""           # Required for agent nodes
+k3s_token: ""                # Required for agent nodes
+k3s_extra_server_args: "--write-kubeconfig-mode 644"
+k3s_extra_agent_args: ""
+
+# Installation control
+install_docker: true
+install_kubectl: true
+install_k3d: true
+install_k3s: true
+
+# Service configuration
+start_services: true
+enable_services: true
+
+# Cleanup configuration
+cleanup_temp_files: true
