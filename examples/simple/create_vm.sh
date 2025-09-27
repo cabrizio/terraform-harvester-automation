@@ -8,7 +8,7 @@ set -e
 DEFAULT_CPU=2
 DEFAULT_DISK_SIZE="20Gi"
 DEFAULT_MEMORY="4Gi"
-DEFAULT_NETWORK="edge/vm-network"
+DEFAULT_NETWORK="development/vm-network"
 DEFAULT_SSH_KEY="../ansible/demo-key"
 DEFAULT_RUN_ANSIBLE=false
 DEFAULT_RUN_ANSIBLE_CONTAINER=false

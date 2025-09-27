@@ -1,0 +1,330 @@
+pipeline {
+    agent {label 'worker'}
+
+    triggers {
+        // Poll SCM every 5 minutes for changes
+        pollSCM('H/5 * * * *')
+        // Alternatively, use webhook triggers in production
+        // githubPush()
+    }
+
+    environment {
+        // Set Terraform version if needed
+        TF_VERSION = '1.5.0'
+        // Disable Terraform color output for cleaner logs
+        TF_IN_AUTOMATION = 'true'
+        TF_CLI_ARGS = '-no-color'
+        // Set kubeconfig path
+        KUBECONFIG = "${WORKSPACE}/.kube/config"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    echo "🔄 Checking out terraform-harvester repository..."
+                    sh '''
+                        echo "Current directory: $(pwd)"
+                        echo "Repository contents:"
+                        ls -la
+                        echo "Examples directory contents:"
+                        ls -la examples/
+                        echo "Git branch: $(git branch --show-current)"
+                        echo "Latest commit: $(git log --oneline -1)"
+                    '''
+                }
+            }
+        }
+
+        stage('Setup Kubeconfig') {
+            steps {
+                script {
+                    echo "⚙️ Setting up Kubernetes configuration..."
+                    withCredentials([file(credentialsId: 'harvester-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                        sh '''
+                            # Create the directory structure that Terraform expects
+                            mkdir -p /home/ansible/.kube/configs
+                            mkdir -p ${WORKSPACE}/.kube
+
+                            # Copy kubeconfig to expected location for Terraform
+                            cp "$KUBECONFIG_FILE" /home/ansible/.kube/configs/harvester.yaml
+
+                            # Also copy to workspace for kubectl commands if needed
+                            cp "$KUBECONFIG_FILE" ${WORKSPACE}/.kube/config
+
+                            # Set proper permissions
+                            chmod 600 /home/ansible/.kube/configs/harvester.yaml
+                            chmod 600 ${WORKSPACE}/.kube/config
+
+                            echo "✅ Kubeconfig files created successfully"
+                            echo "Terraform kubeconfig: /home/ansible/.kube/configs/harvester.yaml"
+                            echo "Jenkins kubeconfig: ${WORKSPACE}/.kube/config"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Validate Kubernetes Connection') {
+            steps {
+                script {
+                    echo "🔍 Validating Kubernetes connection..."
+                    sh '''
+                        # Test kubectl connection using workspace kubeconfig
+                        export KUBECONFIG=${WORKSPACE}/.kube/config
+
+                        # Basic connectivity test
+                        if kubectl cluster-info > /dev/null 2>&1; then
+                            echo "✅ Kubernetes cluster is accessible"
+                            kubectl version || true
+                            kubectl get nodes --no-headers | wc -l | xargs echo "Number of nodes:"
+                        else
+                            echo "⚠️ Warning: Cannot connect to Kubernetes cluster"
+                            echo "This may be expected if running in a restricted environment"
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Validate') {
+            steps {
+                script {
+                    echo "🔍 Validating Terraform configuration in examples directory..."
+                    dir('examples/simple') {
+                        sh '''
+                            echo "Working in: $(pwd)"
+                            echo "Contents:"
+                            ls -la
+
+                            # Verify kubeconfig exists where Terraform expects it
+                            if [ -f "/home/ansible/.kube/configs/harvester.yaml" ]; then
+                                echo "✅ Kubeconfig found at expected location"
+                            else
+                                echo "❌ Kubeconfig not found at /home/ansible/.kube/configs/harvester.yaml"
+                                exit 1
+                            fi
+
+                            # Initialize Terraform (download providers/modules)
+                            terraform init -backend=false
+
+                            # Validate Terraform syntax and configuration
+                            terraform validate
+
+                            # Format check (will fail if files are not properly formatted)
+                            terraform fmt -check -recursive
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                script {
+                    echo "🛡️ Running security scans..."
+                    dir('examples/simple') {
+                        sh '''
+                            # Check for sensitive data in code (basic grep check)
+                            echo "Checking for potential secrets..."
+                            if grep -r -i "password\\|secret\\|key\\|token" --include="*.tf" --include="*.tfvars" . | grep -v "variable\\|description\\|ssh_key\\|kubeconfig"; then
+                                echo "⚠️ Warning: Found potential secrets in code"
+                            else
+                                echo "✅ No obvious secrets found"
+                            fi
+
+                            # Check for hardcoded IPs or sensitive patterns
+                            echo "Checking for hardcoded IPs..."
+                            if grep -r -E "([0-9]{1,3}\\.){3}[0-9]{1,3}" --include="*.tf" . | grep -v "0.0.0.0\\|127.0.0.1"; then
+                                echo "⚠️ Warning: Found hardcoded IP addresses"
+                            else
+                                echo "✅ No hardcoded IPs found"
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Lint and Best Practices') {
+            steps {
+                script {
+                    echo "📋 Running linting and best practice checks..."
+                    dir('examples/simple') {
+                        sh '''
+                            # Check for common Terraform best practices
+                            echo "Checking Terraform file structure in examples directory..."
+
+                            # Verify main files exist
+                            for file in main.tf variables.tf outputs.tf; do
+                                if [ -f "$file" ]; then
+                                    echo "✅ Found $file"
+                                else
+                                    echo "⚠️  $file not found (recommended for larger projects)"
+                                fi
+                            done
+
+                            # Check for example-specific files
+                            if [ -f "terraform.tfvars.example" ] || [ -f "terraform.tfvars" ]; then
+                                echo "✅ Found terraform.tfvars file"
+                            else
+                                echo "⚠️ No terraform.tfvars example found"
+                            fi
+                        '''
+                    }
+
+                    //Check repository root for README and .gitignore
+                    sh '''
+                        # Check for README
+                        if [ -f "README.md" ]; then
+                            echo "✅ README.md exists"
+                        else
+                            echo "⚠️ README.md not found (recommended)"
+                        fi
+
+                        # Check for .gitignore
+                        if [ -f ".gitignore" ]; then
+                            echo "✅ .gitignore exists"
+                            if grep -q "*.tfstate" .gitignore; then
+                                echo "✅ .gitignore includes tfstate files"
+                            else
+                                echo "⚠️ .gitignore should include *.tfstate files"
+                            fi
+                        else
+                            echo "⚠️ .gitignore not found"
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Plan (Dry Run)') {
+            steps {
+                script {
+                    echo "📋 Running Terraform plan (dry run)..."
+                    dir('examples/simple') {
+                        sh '''
+                            # Verify kubeconfig is still available
+                            if [ ! -f "/home/ansible/.kube/configs/harvester.yaml" ]; then
+                                echo "❌ Kubeconfig file missing before plan"
+                                exit 1
+                            fi
+
+                            # Initialize with backend (if configured)
+                            terraform init
+
+                            # Create execution plan
+                            terraform plan --var-file example.tfvars -out=tfplan -detailed-exitcode || {
+                                exit_code=$?
+                                if [ $exit_code -eq 1 ]; then
+                                    echo "❌ Terraform plan failed"
+                                    exit 1
+                                elif [ $exit_code -eq 2 ]; then
+                                    echo "✅ Terraform plan succeeded with changes"
+                                else
+                                    echo "✅ Terraform plan succeeded with no changes"
+                                fi
+                            }
+
+                            # Show the plan summary
+                            echo "Plan summary:"
+                            terraform show -no-color tfplan | head -50
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Documentation Check') {
+            steps {
+                script {
+                    echo "📚 Checking documentation..."
+                    dir('examples/simple') {
+                        sh '''
+                            # Check if variables are documented
+                            if [ -f "variables.tf" ]; then
+                                undocumented=$(grep -c "description.*=.*\"\"" variables.tf || echo "0")
+                                total_vars=$(grep -c "variable" variables.tf || echo "0")
+                                if [ "$undocumented" -gt 0 ]; then
+                                    echo "⚠️ Found $undocumented undocumented variables out of $total_vars"
+                                else
+                                    echo "✅ All $total_vars variables are documented"
+                                fi
+                            fi
+
+                            # Check if outputs are documented
+                            if [ -f "outputs.tf" ]; then
+                                undocumented_outputs=$(grep -c "description.*=.*\"\"" outputs.tf || echo "0")
+                                total_outputs=$(grep -c "output" outputs.tf || echo "0")
+                                if [ "$undocumented_outputs" -gt 0 ]; then
+                                    echo "⚠️ Found $undocumented_outputs undocumented outputs out of $total_outputs"
+                                else
+                                    echo "✅ All $total_outputs outputs are documented"
+                                fi
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Clean up Terraform files in examples directory
+            dir('examples/simple') {
+                sh '''
+                    rm -f tfplan
+                    rm -rf .terraform/
+                '''
+            }
+
+            // Clean up sensitive kubeconfig files
+            sh '''
+                rm -f /home/ansible/.kube/configs/harvester.yaml
+                rm -f ${WORKSPACE}/.kube/config
+                rmdir /home/ansible/.kube/configs 2>/dev/null || true
+                rmdir /home/ansible/.kube 2>/dev/null || true
+                rm -rf ${WORKSPACE}/.kube
+            '''
+
+            // Archive any logs or reports
+            archiveArtifacts artifacts: '*.log', allowEmptyArchive: true
+
+            echo "🧹 Cleanup completed (including kubeconfig files)"
+        }
+
+        success {
+            echo "🎉 All terraform-harvester tests passed successfully!"
+            // Optionally send notifications
+            // slackSend(message: "✅ Terraform Harvester pipeline succeeded for ${env.BRANCH_NAME}")
+        }
+
+        failure {
+            echo "💥 Terraform-harvester tests failed. Check the logs above for details."
+            // Optionally send failure notifications
+            // slackSend(message: "❌ Terraform Harvester pipeline failed for ${env.BRANCH_NAME}")
+        }
+
+        changed {
+            echo "📈 Pipeline status changed from previous run"
+        }
+    }
+
+    options {
+        // Keep builds for 30 days
+        buildDiscarder(logRotator(daysToKeepStr: '30'))
+
+        // Timeout the entire pipeline after 15 minutes
+        timeout(time: 15, unit: 'MINUTES')
+
+        // Retry on failure up to 2 times
+        retry(2)
+
+        // Skip checkout to default agent workspace
+        skipDefaultCheckout(false)
+
+        // Timestamps in console output
+        timestamps()
+    }
+}

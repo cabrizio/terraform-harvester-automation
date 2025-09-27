@@ -1,0 +1,200 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'VM_NAME',
+            defaultValue: 'test-vm',
+            description: 'Name of the VM to create'
+        )
+        choice(
+            name: 'VM_NAMESPACE',
+            choices: ['development', 'staging', 'production'],
+            description: 'development'
+        )
+        choice(
+            name: 'DISK_SIZE',
+            choices: ['20Gi', '40Gi', '80Gi', '100Gi'],
+            description: 'Disk size (optional)'
+        )
+        choice(
+            name: 'CPU',
+            choices: ['2', '4', '8'],
+            description: 'CPU cores'
+        )
+        choice(
+            name: 'MEMORY',
+            choices: ['4Gi', '8Gi', '16Gi'],
+            description: 'Memory size'
+        )
+        booleanParam(
+            name: 'RUN_ANSIBLE',
+            defaultValue: false,
+            description: 'Run Ansible configuration'
+        )
+        booleanParam(
+            name: 'INSTALL_DOCKER',
+            defaultValue: false,
+            description: 'Install Docker'
+        )
+    }
+
+    environment {
+        TF_VERSION = '1.5.0'
+        TF_IN_AUTOMATION = 'true'
+        TF_CLI_ARGS = '-no-color'
+        KUBECONFIG = "${WORKSPACE}/.kube/config"
+        VM_NAME = "${env.BRANCH_NAME.replaceAll('/', '-')}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                dir('examples/cicd') {
+                    sh 'chmod +x create_vm_ci_cd.sh'
+                }
+            }
+        }
+
+        stage('Setup Kubeconfig') {
+            steps {
+                script {
+                    echo "⚙️ Setting up Kubernetes configuration..."
+                    withCredentials([file(credentialsId: 'harvester-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                        sh '''
+                            # Create the directory structure that Terraform expects
+                            mkdir -p /home/ansible/.kube/configs
+                            mkdir -p ${WORKSPACE}/.kube
+
+                            # Copy kubeconfig to expected location for Terraform
+                            cp "$KUBECONFIG_FILE" /home/ansible/.kube/configs/harvester.yaml
+
+                            # Also copy to workspace for kubectl commands if needed
+                            cp "$KUBECONFIG_FILE" ${WORKSPACE}/.kube/config
+
+                            # Set proper permissions
+                            chmod 600 /home/ansible/.kube/configs/harvester.yaml
+                            chmod 600 ${WORKSPACE}/.kube/config
+
+                            echo "✅ Kubeconfig files created successfully"
+                            echo "Terraform kubeconfig: /home/ansible/.kube/configs/harvester.yaml"
+                            echo "Jenkins kubeconfig: ${WORKSPACE}/.kube/config"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Copy private key') {
+            steps {
+                script {
+                    echo "🔑 Copying private SSH key for Git access..."
+                    withCredentials([file(credentialsId: 'demo-key', variable: 'SSH_PRIVATE_FILE')]) {
+                        sh '''
+                            # Ensure .ssh directory exists
+                            mkdir -p /home/ansible/.ssh
+
+                            # Copy the private key
+                            cp "$SSH_PRIVATE_FILE" /home/ansible/.ssh/id_rsa
+                            cp "$SSH_PRIVATE_FILE" ${WORKSPACE}/ansible/demo-key
+
+                            # Set proper permissions
+                            chmod 600 /home/ansible/.ssh/id_rsa
+                            chmod 600 ${WORKSPACE}/ansible/demo-key
+
+                            echo "✅ Private SSH key copied successfully"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Create VM') {
+            when {
+                not {
+                    anyOf {
+                        branch 'main'
+                        branch 'master'
+                    }
+                }
+            }
+            steps {
+                dir('examples/cicd') {
+                    script {
+                        // Build command
+                        def cmd = "./create_vm_ci_cd.sh"
+
+                        cmd += " ${env.VM_NAME}"
+                        cmd += " ${params.VM_NAMESPACE}"
+
+                        if (params.DISK_SIZE != '20Gi') {
+                            cmd += " ${params.DISK_SIZE}"
+                        }
+
+                        cmd += " --cpu ${params.CPU}"
+                        cmd += " --memory ${params.MEMORY}"
+
+                        if (params.RUN_ANSIBLE) {
+                            cmd += " --run-ansible"
+                        }
+
+                        if (params.INSTALL_DOCKER) {
+                            cmd += " --container"
+                        }
+
+                        echo "Executing: ${cmd}"
+                        sh cmd
+                    }
+                }
+            }
+        }
+
+        stage('Get VM Info') {
+            steps {
+                dir('examples/cicd') {
+                    script {
+                        def vmIP = sh(
+                            script: """
+                                terraform output -json | jq -r '.["${env.VM_NAME}_output"].value.all.ip_address // .all.value.all.ip_address // .all.value.ip_address // "N/A"' 2>/dev/null || echo "N/A"
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        echo "VM IP: ${vmIP}"
+
+                        if (vmIP != "N/A" && vmIP != "") {
+                            env.VM_IP = vmIP
+                            currentBuild.description = "VM: ${env.VM_NAME} (${vmIP})"
+                        } else {
+                            echo "Warning: Could not retrieve IP for VM: ${params.VM_NAME}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            script {
+                def sshCmd = env.VM_IP ? "ssh -i ansible/demo-key ansible@${env.VM_IP}" : "Check Terraform output for IP"
+                echo """
+VM Created Successfully!
+Name: ${env.VM_NAME}
+Namespace: ${params.VM_NAMESPACE}
+IP: ${env.VM_IP ?: 'Check terraform output'}
+SSH: ${sshCmd}
+"""
+            }
+        }
+
+        failure {
+            echo "VM creation failed. Check logs for details."
+        }
+
+        always {
+            cleanWs()
+        }
+    }
+}

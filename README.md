@@ -121,7 +121,7 @@ module "container_vm" {
   vm_cpu             = 4
   vm_memory          = "8Gi"
   vm_disk_size       = "40Gi"
-  vm_network_name    = "edge/vm-network"
+  vm_network_name    = "development/vm-network"
   vm_ssh_key         = "./ansible/demo-key"
   run_ansible        = true
   ansible_extra_vars = {
@@ -204,7 +204,7 @@ The module includes a comprehensive Jenkins pipeline (`Jenkinsfile.deploy`) for 
 ### Pipeline Parameters
 
 - **VM_NAME**: Name of the VM to create
-- **VM_NAMESPACE**: Target namespace (development, edge, staging, production)
+- **VM_NAMESPACE**: Target namespace (development, staging, production)
 - **DISK_SIZE**: Disk size options (20Gi, 40Gi, 80Gi, 100Gi)
 - **CPU**: CPU cores (2, 4, 8)
 - **MEMORY**: Memory allocation (4Gi, 8Gi, 16Gi)
