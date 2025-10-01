@@ -40,24 +40,24 @@ pipeline {
             steps {
                 script {
                     echo "⚙️ Setting up Kubernetes configuration..."
-                    withCredentials([file(credentialsId: 'harvester-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                    withCredentials([file(credentialsId: 'hivemq-harvester-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
                         sh '''
                             # Create the directory structure that Terraform expects
                             mkdir -p /home/ansible/.kube/configs
                             mkdir -p ${WORKSPACE}/.kube
 
                             # Copy kubeconfig to expected location for Terraform
-                            cp "$KUBECONFIG_FILE" /home/ansible/.kube/configs/harvester.yaml
+                            cp "$KUBECONFIG_FILE" /home/ansible/.kube/configs/hivemq-harvester.yaml
 
                             # Also copy to workspace for kubectl commands if needed
                             cp "$KUBECONFIG_FILE" ${WORKSPACE}/.kube/config
 
                             # Set proper permissions
-                            chmod 600 /home/ansible/.kube/configs/harvester.yaml
+                            chmod 600 /home/ansible/.kube/configs/hivemq-harvester.yaml
                             chmod 600 ${WORKSPACE}/.kube/config
 
                             echo "✅ Kubeconfig files created successfully"
-                            echo "Terraform kubeconfig: /home/ansible/.kube/configs/harvester.yaml"
+                            echo "Terraform kubeconfig: /home/ansible/.kube/configs/hivemq-harvester.yaml"
                             echo "Jenkins kubeconfig: ${WORKSPACE}/.kube/config"
                         '''
                     }
@@ -91,17 +91,17 @@ pipeline {
             steps {
                 script {
                     echo "🔍 Validating Terraform configuration in examples directory..."
-                    dir('examples/simple') {
+                    dir('examples/module_check') {
                         sh '''
                             echo "Working in: $(pwd)"
                             echo "Contents:"
                             ls -la
 
                             # Verify kubeconfig exists where Terraform expects it
-                            if [ -f "/home/ansible/.kube/configs/harvester.yaml" ]; then
+                            if [ -f "/home/ansible/.kube/configs/hivemq-harvester.yaml" ]; then
                                 echo "✅ Kubeconfig found at expected location"
                             else
-                                echo "❌ Kubeconfig not found at /home/ansible/.kube/configs/harvester.yaml"
+                                echo "❌ Kubeconfig not found at /home/ansible/.kube/configs/hivemq-harvester.yaml"
                                 exit 1
                             fi
 
@@ -123,7 +123,7 @@ pipeline {
             steps {
                 script {
                     echo "🛡️ Running security scans..."
-                    dir('examples/simple') {
+                    dir('examples/module_check') {
                         sh '''
                             # Check for sensitive data in code (basic grep check)
                             echo "Checking for potential secrets..."
@@ -150,7 +150,7 @@ pipeline {
             steps {
                 script {
                     echo "📋 Running linting and best practice checks..."
-                    dir('examples/simple') {
+                    dir('examples/module_check') {
                         sh '''
                             # Check for common Terraform best practices
                             echo "Checking Terraform file structure in examples directory..."
@@ -202,10 +202,10 @@ pipeline {
             steps {
                 script {
                     echo "📋 Running Terraform plan (dry run)..."
-                    dir('examples/simple') {
+                    dir('examples/module_check') {
                         sh '''
                             # Verify kubeconfig is still available
-                            if [ ! -f "/home/ansible/.kube/configs/harvester.yaml" ]; then
+                            if [ ! -f "/home/ansible/.kube/configs/hivemq-harvester.yaml" ]; then
                                 echo "❌ Kubeconfig file missing before plan"
                                 exit 1
                             fi
@@ -239,7 +239,7 @@ pipeline {
             steps {
                 script {
                     echo "📚 Checking documentation..."
-                    dir('examples/simple') {
+                    dir('examples/module_check') {
                         sh '''
                             # Check if variables are documented
                             if [ -f "variables.tf" ]; then
@@ -272,7 +272,7 @@ pipeline {
     post {
         always {
             // Clean up Terraform files in examples directory
-            dir('examples/simple') {
+            dir('examples/module_check') {
                 sh '''
                     rm -f tfplan
                     rm -rf .terraform/
@@ -281,7 +281,7 @@ pipeline {
 
             // Clean up sensitive kubeconfig files
             sh '''
-                rm -f /home/ansible/.kube/configs/harvester.yaml
+                rm -f /home/ansible/.kube/configs/hivemq-harvester.yaml
                 rm -f ${WORKSPACE}/.kube/config
                 rmdir /home/ansible/.kube/configs 2>/dev/null || true
                 rmdir /home/ansible/.kube 2>/dev/null || true

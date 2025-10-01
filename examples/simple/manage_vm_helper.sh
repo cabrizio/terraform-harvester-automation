@@ -1,14 +1,13 @@
 #!/bin/bash
 set -e
-
 # VM Creation Wrapper Script
-# Usage: ./create_vm_ci_cd.sh <vm_name> <namespace> <disk_size> [options]
+# Usage: ./create-vm.sh <vm_name> <namespace> <disk_size> [options]
 
 # Default values
 DEFAULT_CPU=2
 DEFAULT_DISK_SIZE="20Gi"
 DEFAULT_MEMORY="4Gi"
-DEFAULT_NETWORK="development/vm-network"
+DEFAULT_NETWORK="edge/vm-network"
 DEFAULT_SSH_KEY="../../ansible/demo-key"
 DEFAULT_RUN_ANSIBLE=false
 DEFAULT_RUN_ANSIBLE_CONTAINER="{enable_container=false}"
@@ -59,6 +58,7 @@ VM_DISK_SIZE="$DEFAULT_DISK_SIZE"
 VM_NETWORK="$DEFAULT_NETWORK"
 VM_SSH_KEY="$DEFAULT_SSH_KEY"
 RUN_ANSIBLE="$DEFAULT_RUN_ANSIBLE"
+ENABLE_CONTAINER="false"
 ENABLE_CONTAINER="$DEFAULT_RUN_ANSIBLE_CONTAINER"
 
 # Parse optional arguments
@@ -92,10 +92,9 @@ while [ $# -gt 0 ]; do
             ENABLE_CONTAINER={enable_container=true}
             shift
             ;;
-        --destroy)
-            echo "Destroying VM $VM_NAME in namespace $VM_NAMESPACE"
-            terraform destroy --target="module.$VM_NAME" -auto-approve
-            exit 0
+        --cicd)
+            ENABLE_CICD="true"
+            shift
             ;;
         --help)
             usage
@@ -148,84 +147,143 @@ echo "================================="
 # Create Terraform main.tf if not exists
 if [ ! -f "./main.tf" ]; then
     MAIN_TF_FILE="main-${VM_NAME}.tf"
-    cat > "$MAIN_TF_FILE" << EOF
-    # Auto-generated main.tf for VM: $VM_NAME
-    module "${VM_NAME}" {
-      source          = "../../"
-      vm_name         = "$VM_NAME"
-      vm_namespace    = "$VM_NAMESPACE"
-      vm_description  = "$VM_DESCRIPTION"
-      vm_cpu          = $VM_CPU
-      vm_memory       = "$VM_MEMORY"
-      vm_disk_size    = "$VM_DISK_SIZE"
-      vm_network_name = "$VM_NETWORK"
-      vm_ssh_key      = "$VM_SSH_KEY"
-      run_ansible     = $RUN_ANSIBLE
-      ansible_extra_vars = $ENABLE_CONTAINER
-    }
 
-    output "${VM_NAME}_output" {
-      value = module.${VM_NAME}
+    # Determine backend path based on CICD flag
+    if [ "${ENABLE_CICD}" == "true" ]; then
+        BACKEND_PATH="/tmp/${VM_NAME}.tfstate"
+    else
+        BACKEND_PATH="/tmp/terraform.tfstate"
+    fi
+
+    cat > "$MAIN_TF_FILE" << EOF
+# Auto-generated main.tf for VM: $VM_NAME
+terraform {
+  required_providers {
+    harvester = {
+      source  = "harvester/harvester"
+      version = ">= 1.6.0"
     }
+  }
+
+  backend "local" {
+    path = "$BACKEND_PATH"
+  }
+}
+
+provider "harvester" {
+  # Path to kubeconfig file
+  kubeconfig = "~/.kube/configs/hivemq-harvester.yaml"
+  kubecontext = "hivemq-harvester"
+}
+
+module "vm_${VM_NAME}" {
+  source             = "../../"
+  vm_name            = "$VM_NAME"
+  vm_namespace       = "$VM_NAMESPACE"
+  vm_description     = "$VM_DESCRIPTION"
+  vm_cpu             = $VM_CPU
+  vm_memory          = "$VM_MEMORY"
+  vm_disk_size       = "$VM_DISK_SIZE"
+  vm_network_name    = "$VM_NETWORK"
+  vm_ssh_key         = "$VM_SSH_KEY"
+  run_ansible        = $RUN_ANSIBLE
+  ansible_extra_vars = $ENABLE_CONTAINER
+}
+
+output "vm_${VM_NAME}_output" {
+  value = module.vm_${VM_NAME}
+}
 EOF
 else
   echo "Using existing main.tf"
 fi
 
+if [ "$ENABLE_CICD" = "true" ]; then
+    echo "CICD Mode Enabled: true"
+else
+  # Confirm before proceeding
+  read -p "Proceed with VM creation? (y/N): " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Operation cancelled"
+      exit 0
+  fi
+fi
+
 # Execute Terraform
 echo "Executing Terraform..."
-terraform init -upgrade
+terraform init
 terraform plan
 
-terraform apply --target="module.$VM_NAME" -auto-approve
+if [ "$ENABLE_CICD" = "true" ]; then
+    terraform apply -auto-approve
 
-if [ $? -eq 0 ]; then
-    echo ""
-    echo "=== VM Creation Completed Successfully ==="
-    echo "VM Name: $VM_NAME"
-    echo "Namespace: $VM_NAMESPACE"
-
-    # Get VM IP address from Terraform output
-    echo "Getting VM IP address from Terraform state..."
-    if command -v jq >/dev/null 2>&1; then
-        # Try multiple JSON paths to find the IP (properly escape VM name with hyphens)
-        VM_IP=$(terraform output -json | jq -r ".[\"${VM_NAME}_output\"].value.all.ip_address // .all.value.all.ip_address // .all.value.ip_address // empty" 2>/dev/null)
-
-        # If still empty, try to find any output with ip_address
-        if [ -z "$VM_IP" ]; then
-            VM_IP=$(terraform output -json | jq -r '.[] | select(.value.all.ip_address) | .value.all.ip_address' 2>/dev/null | head -1)
-        fi
-    fi
-
-    if [ -z "$VM_IP" ]; then
-        VM_IP="Not available yet"
-    fi
-    echo "VM IP Address: $VM_IP"
-
-
-    if [ "$RUN_ANSIBLE" = "true" ] && [ "$VM_IP" != "Not available yet" ]; then
+    if [ $? -eq 0 ]; then
         echo ""
-        if [ "$ENABLE_CONTAINER" = "true" ]; then
-            echo "Ansible was executed with container setup enabled (enable_container=true)"
-        else
-            echo "Ansible was executed with default configuration"
-        fi
+        echo "=== VM Creation Completed Successfully ==="
+        echo "VM Name: $VM_NAME"
+        echo "Namespace: $VM_NAMESPACE"
     fi
+else
+    read -p "Apply Terraform changes? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        terraform apply -auto-approve
 
-    echo ""
-    echo "SSH Access:"
-    echo "  ssh -i $VM_SSH_KEY ansible@$VM_IP"
+        if [ $? -eq 0 ]; then
+            echo ""
+            echo "=== VM Creation Completed Successfully ==="
+            echo "VM Name: $VM_NAME"
+            echo "Namespace: $VM_NAMESPACE"
+        else
+            echo "Error: Terraform apply failed"
+            exit 1
+        fi
+    else
+        echo "Terraform apply cancelled"
+        echo "Cleanup: rm $VAR_FILE"
+    fi
+fi
+
+# Get VM IP address from Terraform output
+echo "Getting VM IP address from Terraform state..."
+if command -v jq >/dev/null 2>&1; then
+    # Try multiple JSON paths to find the IP (properly escape VM name with hyphens)
+    VM_IP=$(terraform output -json | jq -r ".[\"${VM_NAME}_output\"].value.all.ip_address // .all.value.all.ip_address // .all.value.ip_address // empty" 2>/dev/null)
+
+    # If still empty, try to find any output with ip_address
+    if [ -z "$VM_IP" ]; then
+        VM_IP=$(terraform output -json | jq -r '.[] | select(.value.all.ip_address) | .value.all.ip_address' 2>/dev/null | head -1)
+    fi
+fi
+
+if [ -z "$VM_IP" ]; then
+    VM_IP="Not available yet"
+fi
+echo "VM IP Address: $VM_IP"
+
+if [ "$RUN_ANSIBLE" = "true" ] && [ "$VM_IP" != "Not available yet" ]; then
     echo ""
     if [ "$ENABLE_CONTAINER" = "true" ]; then
-        echo "Manual Ansible with container setup:"
-        echo "  ansible-playbook -i inventory.ini linux-playbook.yml --private-key=$VM_SSH_KEY -e \"enable_container=true\""
-        echo ""
+        echo "Ansible was executed with container setup enabled (enable_container=true)"
+    else
+        echo "Ansible was executed with default configuration"
     fi
-    echo "Cleanup:"
-    echo "  terraform destroy --target=module.$VM_NAME"
-    echo "============================================="
-
-else
-    echo "Error: Terraform apply failed"
-    exit 1
 fi
+
+echo ""
+echo "SSH Access:"
+echo "  ssh -i $VM_SSH_KEY ansible@$VM_IP"
+echo ""
+
+if [ "$ENABLE_CONTAINER" = "true" ]; then
+    echo "Manual Ansible with container setup:"
+    echo "  ansible-playbook -i inventory.ini linux-playbook.yml --private-key=$VM_SSH_KEY -e \"enable_container=true\""
+    echo ""
+fi
+
+echo "Cleanup:"
+echo "  terraform destroy --target=module.$VM_NAME"
+echo "  terraform state rm module.vm_$VM_NAME"
+
+exit 0

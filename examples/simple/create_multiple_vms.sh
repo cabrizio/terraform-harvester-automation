@@ -24,7 +24,7 @@ for i in $(seq 1 $VM_COUNT); do
     echo "=== Creating VM $i/$VM_COUNT: $VM_NAME ==="
 
     # Call the existing create-vm.sh script
-   ./create_vm_ci_cd.sh "$VM_NAME" "$VM_NAMESPACE" "$@"
+   ./manage_vm_helper.sh "$VM_NAME" "$VM_NAMESPACE" "$@"
 
     if [ $? -eq 0 ]; then
         echo "VM $VM_NAME created successfully"

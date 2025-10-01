@@ -9,7 +9,7 @@ pipeline {
         )
         choice(
             name: 'VM_NAMESPACE',
-            choices: ['development', 'staging', 'production'],
+            choices: ['development', 'edge', 'staging', 'production'],
             description: 'development'
         )
         choice(
@@ -29,13 +29,13 @@ pipeline {
         )
         booleanParam(
             name: 'RUN_ANSIBLE',
-            defaultValue: false,
+            defaultValue: true,
             description: 'Run Ansible configuration'
         )
         booleanParam(
             name: 'INSTALL_DOCKER',
-            defaultValue: false,
-            description: 'Install Docker'
+            defaultValue: true,
+            description: 'Install Docker, K3D, K3S on the VM'
         )
     }
 
@@ -51,8 +51,8 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                dir('examples/cicd') {
-                    sh 'chmod +x create_vm_ci_cd.sh'
+                dir('examples/simple') {
+                    sh 'chmod +x manage_vm_helper.sh'
                 }
             }
         }
@@ -61,24 +61,24 @@ pipeline {
             steps {
                 script {
                     echo "⚙️ Setting up Kubernetes configuration..."
-                    withCredentials([file(credentialsId: 'harvester-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                    withCredentials([file(credentialsId: 'hivemq-harvester-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
                         sh '''
                             # Create the directory structure that Terraform expects
                             mkdir -p /home/ansible/.kube/configs
                             mkdir -p ${WORKSPACE}/.kube
 
                             # Copy kubeconfig to expected location for Terraform
-                            cp "$KUBECONFIG_FILE" /home/ansible/.kube/configs/harvester.yaml
+                            cp "$KUBECONFIG_FILE" /home/ansible/.kube/configs/hivemq-harvester.yaml
 
                             # Also copy to workspace for kubectl commands if needed
                             cp "$KUBECONFIG_FILE" ${WORKSPACE}/.kube/config
 
                             # Set proper permissions
-                            chmod 600 /home/ansible/.kube/configs/harvester.yaml
+                            chmod 600 /home/ansible/.kube/configs/hivemq-harvester.yaml
                             chmod 600 ${WORKSPACE}/.kube/config
 
                             echo "✅ Kubeconfig files created successfully"
-                            echo "Terraform kubeconfig: /home/ansible/.kube/configs/harvester.yaml"
+                            echo "Terraform kubeconfig: /home/ansible/.kube/configs/hivemq-harvester.yaml"
                             echo "Jenkins kubeconfig: ${WORKSPACE}/.kube/config"
                         '''
                     }
@@ -120,10 +120,10 @@ pipeline {
                 }
             }
             steps {
-                dir('examples/cicd') {
+                dir('examples/simple') {
                     script {
                         // Build command
-                        def cmd = "./create_vm_ci_cd.sh"
+                        def cmd = "./manage_vm_helper.sh"
 
                         cmd += " ${env.VM_NAME}"
                         cmd += " ${params.VM_NAMESPACE}"
@@ -134,6 +134,7 @@ pipeline {
 
                         cmd += " --cpu ${params.CPU}"
                         cmd += " --memory ${params.MEMORY}"
+                        cmd += " --cicd"
 
                         if (params.RUN_ANSIBLE) {
                             cmd += " --run-ansible"
@@ -152,11 +153,11 @@ pipeline {
 
         stage('Get VM Info') {
             steps {
-                dir('examples/cicd') {
+                dir('examples/simple') {
                     script {
                         def vmIP = sh(
                             script: """
-                                terraform output -json | jq -r '.["${env.VM_NAME}_output"].value.all.ip_address // .all.value.all.ip_address // .all.value.ip_address // "N/A"' 2>/dev/null || echo "N/A"
+                                terraform output -json | jq -r '.["vm_${env.VM_NAME}_output"].value.all.ip_address // .all.value.all.ip_address // .all.value.ip_address // "N/A"' 2>/dev/null || echo "N/A"
                             """,
                             returnStdout: true
                         ).trim()
@@ -167,7 +168,7 @@ pipeline {
                             env.VM_IP = vmIP
                             currentBuild.description = "VM: ${env.VM_NAME} (${vmIP})"
                         } else {
-                            echo "Warning: Could not retrieve IP for VM: ${params.VM_NAME}"
+                            echo "Warning: Could not retrieve IP for VM: ${env.VM_NAME}"
                         }
                     }
                 }
